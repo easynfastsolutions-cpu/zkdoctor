@@ -146,7 +146,8 @@ jobs:
           python3 -m venv .venv
           .venv/bin/pip install --quiet --disable-pip-version-check .
           .venv/bin/pip freeze > out/pip-freeze.txt
-          .venv/bin/zkdoctor --version
+          # not `zkdoctor --version`: that flag is broken in V0.1 (exits 2, "Missing command")
+          .venv/bin/python -c "import zkdoctor; print('zkdoctor', zkdoctor.__version__)"
 
       - name: Scan the L2 endpoint
         run: |
@@ -231,6 +232,9 @@ jobs:
         run: |
           mkdir -p out
           ls -l scans
+          for f in scans/scan-A.json scans/scan-B.json; do
+            [ -f "$f" ] || { echo "::error::missing input $f (a scan job did not produce it)"; exit 1; }
+          done
           set +e
           .venv/bin/zkdoctor compare scans/scan-A.json scans/scan-B.json --output out/comparison.json \
             > out/comparison.txt 2>&1
