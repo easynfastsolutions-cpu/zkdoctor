@@ -1,0 +1,410 @@
+{
+  "schema_version": "0.1",
+  "tool_version": "0.1.0",
+  "scan_id": "3b5ffc3c606f4697b76566ee56ff0001",
+  "timestamp": "2026-09-20T21:18:22.066Z",
+  "environment": {
+    "endpoint": "https://zksync-os-testnet-alpha.zksync.dev/",
+    "endpoint_fingerprint": "194d43ed10d0ee56",
+    "chain_id": 8022833,
+    "net_version": "0x7a6b31",
+    "client_version": "zksync-os/v0.24.0",
+    "detected_execution_environment": "zksync-os",
+    "detection_basis": [
+      "zks_getGenesis supported (documented as ZKsync OS only)",
+      "zks_getBlockMetadataByNumber supported (documented as ZKsync OS only)"
+    ],
+    "execution_version": null,
+    "protocol_metadata": {
+      "genesis_root": "0xc346a158cce093e99ab65a95c884a26629d0e4f8d00ae20bbca4bfc4b204eec2"
+    }
+  },
+  "capabilities": {
+    "eth_chainId": {
+      "method": "eth_chainId",
+      "supported": true,
+      "probe_id": "RPC-001",
+      "reason": null
+    },
+    "eth_blockNumber": {
+      "method": "eth_blockNumber",
+      "supported": true,
+      "probe_id": "RPC-002",
+      "reason": null
+    },
+    "web3_clientVersion": {
+      "method": "web3_clientVersion",
+      "supported": true,
+      "probe_id": "RPC-003",
+      "reason": null
+    },
+    "net_version": {
+      "method": "net_version",
+      "supported": true,
+      "probe_id": "RPC-004",
+      "reason": null
+    },
+    "zks_getGenesis": {
+      "method": "zks_getGenesis",
+      "supported": true,
+      "probe_id": "ZKS-001",
+      "reason": null
+    },
+    "zks_getBlockMetadataByNumber": {
+      "method": "zks_getBlockMetadataByNumber",
+      "supported": true,
+      "probe_id": "ZKS-002",
+      "reason": null
+    },
+    "zks_getBlockDetails": {
+      "method": "zks_getBlockDetails",
+      "supported": false,
+      "probe_id": "ZKS-003",
+      "reason": "method not found"
+    },
+    "zks_L1BatchNumber": {
+      "method": "zks_L1BatchNumber",
+      "supported": false,
+      "probe_id": "ZKS-004",
+      "reason": "method not found"
+    },
+    "zks_getL1BatchBlockRange": {
+      "method": "zks_getL1BatchBlockRange",
+      "supported": null,
+      "probe_id": "ZKS-005",
+      "reason": "needs a value from ZKS-004"
+    },
+    "zks_getL1BatchDetails": {
+      "method": "zks_getL1BatchDetails",
+      "supported": null,
+      "probe_id": "ZKS-006",
+      "reason": "needs a value from ZKS-004"
+    },
+    "zks_getBridgehubContract": {
+      "method": "zks_getBridgehubContract",
+      "supported": true,
+      "probe_id": "ZKS-007",
+      "reason": null
+    }
+  },
+  "results": [
+    {
+      "probe_id": "RPC-001",
+      "name": "chain ID",
+      "category": "generic",
+      "status": "PASS",
+      "severity": "INFO",
+      "summary": "ok",
+      "details": [],
+      "evidence": {
+        "timestamp": "2026-09-20T21:18:19.651Z",
+        "probe_id": "RPC-001",
+        "method": "eth_chainId",
+        "params": [],
+        "depends_on": [],
+        "request_hash": "37047d9fa98f2102688f6d8f5163bbe33308161d4f482b3e5853043ce6c7163b",
+        "response_hash": "d6156784529ba7ca099bc98e7b88bf0c9a5e2097b6c980a90c73a3fff12814bc",
+        "http_status": 200,
+        "rpc_error": null,
+        "error": null,
+        "result_summary": {
+          "type": "string",
+          "shape": "string",
+          "size_bytes": 10,
+          "excerpt": "\"0x7a6b31\""
+        },
+        "latency_ms": 701.39
+      }
+    },
+    {
+      "probe_id": "RPC-002",
+      "name": "block number",
+      "category": "generic",
+      "status": "PASS",
+      "severity": "INFO",
+      "summary": "ok",
+      "details": [],
+      "evidence": {
+        "timestamp": "2026-09-20T21:18:20.357Z",
+        "probe_id": "RPC-002",
+        "method": "eth_blockNumber",
+        "params": [],
+        "depends_on": [],
+        "request_hash": "ff072db91c8e601a71479033f33a8b9431a086616281e3ec1f5b4aa6d8ab1388",
+        "response_hash": "124d1683511d233def868756f1db8878360e9dcf7a046b06a4e7f2edb00ebcfa",
+        "http_status": 200,
+        "rpc_error": null,
+        "error": null,
+        "result_summary": {
+          "type": "string",
+          "shape": "string",
+          "size_bytes": 9,
+          "excerpt": "\"0x7b31c\""
+        },
+        "latency_ms": 166.23
+      }
+    },
+    {
+      "probe_id": "RPC-003",
+      "name": "client version",
+      "category": "generic",
+      "status": "PASS",
+      "severity": "INFO",
+      "summary": "ok",
+      "details": [],
+      "evidence": {
+        "timestamp": "2026-09-20T21:18:20.520Z",
+        "probe_id": "RPC-003",
+        "method": "web3_clientVersion",
+        "params": [],
+        "depends_on": [],
+        "request_hash": "071cae3063554d5f1cd79cbe15f781dcb6654753ed27b26834e6a50759bae76d",
+        "response_hash": "c3a9c7b76a73a9aa8b34552ee8562731093bbc45db87b2319a491b04265f52e3",
+        "http_status": 200,
+        "rpc_error": null,
+        "error": null,
+        "result_summary": {
+          "type": "string",
+          "shape": "string",
+          "size_bytes": 19,
+          "excerpt": "\"zksync-os/v0.24.0\""
+        },
+        "latency_ms": 171.34
+      }
+    },
+    {
+      "probe_id": "RPC-004",
+      "name": "net version",
+      "category": "generic",
+      "status": "WARN",
+      "severity": "WARNING",
+      "summary": "response matches schema with deviations",
+      "details": [
+        "net_version is not a decimal string: '0x7a6b31'"
+      ],
+      "evidence": {
+        "timestamp": "2026-09-20T21:18:20.689Z",
+        "probe_id": "RPC-004",
+        "method": "net_version",
+        "params": [],
+        "depends_on": [],
+        "request_hash": "8dc9fa1afd7a735129dcb538396d764b7205ea94f6cf2d646f9e202c301832c6",
+        "response_hash": "d6156784529ba7ca099bc98e7b88bf0c9a5e2097b6c980a90c73a3fff12814bc",
+        "http_status": 200,
+        "rpc_error": null,
+        "error": null,
+        "result_summary": {
+          "type": "string",
+          "shape": "string",
+          "size_bytes": 10,
+          "excerpt": "\"0x7a6b31\""
+        },
+        "latency_ms": 167.21
+      }
+    },
+    {
+      "probe_id": "ZKS-001",
+      "name": "genesis",
+      "category": "zksync",
+      "status": "WARN",
+      "severity": "WARNING",
+      "summary": "response matches schema with deviations",
+      "details": [
+        "documented field 'execution_version' is absent"
+      ],
+      "evidence": {
+        "timestamp": "2026-09-20T21:18:20.850Z",
+        "probe_id": "ZKS-001",
+        "method": "zks_getGenesis",
+        "params": [],
+        "depends_on": [],
+        "request_hash": "c5759f544d7176c7e1371b85de04f5bce721869a7b8f8eed1aff03aa9b1590e0",
+        "response_hash": "c2f869a5b48f9eff125a0a1672b597f7d7d92da5409c909831e44bc336ad2a71",
+        "http_status": 200,
+        "rpc_error": null,
+        "error": null,
+        "result_summary": {
+          "type": "object",
+          "shape": {
+            "additional_preimages": [],
+            "additional_storage": [],
+            "additional_storage_raw": [],
+            "genesis_root": "string",
+            "initial_contracts": [
+              [
+                "string"
+              ]
+            ]
+          },
+          "size_bytes": 47969,
+          "excerpt": {
+            "genesis_root": "0xc346a158cce093e99ab65a95c884a26629d0e4f8d00ae20bbca4bfc4b204eec2"
+          },
+          "keys": [
+            "additional_preimages",
+            "additional_storage",
+            "additional_storage_raw",
+            "genesis_root",
+            "initial_contracts"
+          ]
+        },
+        "latency_ms": 466.6
+      }
+    },
+    {
+      "probe_id": "ZKS-002",
+      "name": "block metadata",
+      "category": "zksync",
+      "status": "WARN",
+      "severity": "WARNING",
+      "summary": "response matches schema with deviations",
+      "details": [
+        "documented field 'execution_version' is absent"
+      ],
+      "evidence": {
+        "timestamp": "2026-09-20T21:18:21.317Z",
+        "probe_id": "ZKS-002",
+        "method": "zks_getBlockMetadataByNumber",
+        "params": [
+          504604
+        ],
+        "depends_on": [
+          "RPC-002"
+        ],
+        "request_hash": "01ebe416fd70c246986d0f8d650b9b97c58f206660a31cc089db84c76ffefa8c",
+        "response_hash": "0ee494d2567ee758db71dbd959229eded0e404caa98dcbddf0006671451fe841",
+        "http_status": 200,
+        "rpc_error": null,
+        "error": null,
+        "result_summary": {
+          "type": "object",
+          "shape": {
+            "native_price": "string",
+            "pubdata_price_per_byte": "string"
+          },
+          "size_bytes": 67,
+          "excerpt": {
+            "pubdata_price_per_byte": "0x171bf4c414",
+            "native_price": "0x1312d0"
+          },
+          "keys": [
+            "native_price",
+            "pubdata_price_per_byte"
+          ]
+        },
+        "latency_ms": 201.75
+      }
+    },
+    {
+      "probe_id": "ZKS-003",
+      "name": "block details",
+      "category": "zksync",
+      "status": "SKIP",
+      "severity": "INFO",
+      "summary": "unsupported",
+      "details": [],
+      "evidence": {
+        "timestamp": "2026-09-20T21:18:21.532Z",
+        "probe_id": "ZKS-003",
+        "method": "zks_getBlockDetails",
+        "params": [
+          504604
+        ],
+        "depends_on": [
+          "RPC-002"
+        ],
+        "request_hash": "a60225542e92548699094b468997c60fc13a81c55cc7133a7314471df7464bae",
+        "response_hash": "4327d305d3fe1484009dce59e6fdfb3c57eda362f67a1d472b1efea39883ecdd",
+        "http_status": 200,
+        "rpc_error": {
+          "code": -32601,
+          "message": "Method not found"
+        },
+        "error": null,
+        "result_summary": {},
+        "latency_ms": 165.95
+      }
+    },
+    {
+      "probe_id": "ZKS-004",
+      "name": "L1 batch number",
+      "category": "zksync",
+      "status": "SKIP",
+      "severity": "INFO",
+      "summary": "unsupported",
+      "details": [],
+      "evidence": {
+        "timestamp": "2026-09-20T21:18:21.696Z",
+        "probe_id": "ZKS-004",
+        "method": "zks_L1BatchNumber",
+        "params": [],
+        "depends_on": [],
+        "request_hash": "ae66d43644e2c6cdde79cbf8df6a776487438b35547d847890f58740ac1982c3",
+        "response_hash": "4327d305d3fe1484009dce59e6fdfb3c57eda362f67a1d472b1efea39883ecdd",
+        "http_status": 200,
+        "rpc_error": {
+          "code": -32601,
+          "message": "Method not found"
+        },
+        "error": null,
+        "result_summary": {},
+        "latency_ms": 202.48
+      }
+    },
+    {
+      "probe_id": "ZKS-005",
+      "name": "L1 batch block range",
+      "category": "zksync",
+      "status": "SKIP",
+      "severity": "INFO",
+      "summary": "skipped: needs a value from ZKS-004",
+      "details": [],
+      "evidence": null
+    },
+    {
+      "probe_id": "ZKS-006",
+      "name": "L1 batch details",
+      "category": "zksync",
+      "status": "SKIP",
+      "severity": "INFO",
+      "summary": "skipped: needs a value from ZKS-004",
+      "details": [],
+      "evidence": null
+    },
+    {
+      "probe_id": "ZKS-007",
+      "name": "bridgehub contract",
+      "category": "zksync",
+      "status": "PASS",
+      "severity": "INFO",
+      "summary": "ok",
+      "details": [],
+      "evidence": {
+        "timestamp": "2026-09-20T21:18:21.897Z",
+        "probe_id": "ZKS-007",
+        "method": "zks_getBridgehubContract",
+        "params": [],
+        "depends_on": [],
+        "request_hash": "81b0cc75aeae18772617134bfdbb380130a0ef62eb8c9744c5455ccad84d1b2c",
+        "response_hash": "5e5e6539c7192b37ec09a3d84b9f778abff9e73ef90c09bb3b57e608b6e6f9d3",
+        "http_status": 200,
+        "rpc_error": null,
+        "error": null,
+        "result_summary": {
+          "type": "string",
+          "shape": "string",
+          "size_bytes": 44,
+          "excerpt": "\"0xc4fd2580c3487bba18d63f50301020132342fdbd\""
+        },
+        "latency_ms": 166.43
+      }
+    }
+  ],
+  "summary": {
+    "pass": 4,
+    "warn": 3,
+    "fail": 0,
+    "skip": 4,
+    "error": 0
+  }
+}

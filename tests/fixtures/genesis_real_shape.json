@@ -1,0 +1,9 @@
+{
+  "additional_preimages": [],
+  "additional_storage": [],
+  "additional_storage_raw": [],
+  "genesis_root": "0xc346a158cce093e99ab65a95c884a26629d0e4f8d00ae20bbca4bfc4b204eec2",
+  "initial_contracts": [
+    ["0x0000000000000000000000000000000000008001", "0x6080604052"]
+  ]
+}
