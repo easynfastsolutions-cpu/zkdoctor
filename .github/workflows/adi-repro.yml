@@ -1,0 +1,153 @@
+# Experiment: try to reproduce the ADI Stack external-node incident (ADI-Stack-EN-Setup-script#21) for real.
+#
+# Runs an ADI external node pinned to the outdated image the incident used (v0.20.12-b1), then runs the
+# UNMODIFIED `zkdoctor watch` with that node as the target and ADI's public mainnet RPC as the reference.
+# Read-only against every public service. See experiments/README.md.
+name: adi-repro
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [experiment/adi-repro]
+    paths:
+      - ".github/workflows/adi-repro.yml"
+      - "experiments/adi_repro_*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: adi-repro
+  cancel-in-progress: false
+
+env:
+  EN_SETUP_REPO: ADI-Foundation-Labs/ADI-Stack-EN-Setup-script
+  EN_SETUP_SHA: cd18f3f1a10c8d3cd43cc47d45cb6d2c5d0429a8  # main at 2026-09-21; README says EN_VERSION v0.20.12-b1
+  EN_VERSION: v0.20.12-b1                                  # the tag pinned by the setup repo and used in the incident
+  L1_RPC_URL: https://mainnet.gateway.tenderly.co          # keyless public Ethereum endpoint that served historical state
+  REFERENCE_RPC: https://rpc.adifoundation.ai/             # ADI's public mainnet RPC (docs.adi.foundation/adi-networks/adi-mainnet)
+  EXPECTED_CHAIN_ID: "0x9024"                              # 36900
+  WATCH_MINUTES: "285"
+
+jobs:
+  repro:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    defaults:
+      run:
+        shell: bash -e {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Runner facts
+        run: |
+          mkdir -p out logs
+          {
+            echo "start_utc=$(date -u +%FT%TZ)"
+            uname -srm; echo "nproc=$(nproc)"; free -m | sed -n '1,2p'; df -h / | sed -n '1,2p'
+            docker --version; docker compose version; python3 --version
+          } | tee out/runner-facts.txt
+
+      - name: Install ZKDoctor (unmodified, from this branch)
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet --disable-pip-version-check .
+          .venv/bin/python -c "import zkdoctor; print('zkdoctor', zkdoctor.__version__)"
+          .venv/bin/zkdoctor watch --help > /dev/null
+
+      - name: Reference sanity (public mainnet RPC, read-only)
+        run: |
+          rpc() { curl -s --max-time 20 -X POST -H 'Content-Type: application/json' \
+                    --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$2\",\"params\":[]}" "$1"; }
+          chain="$(rpc "$REFERENCE_RPC" eth_chainId)"; head="$(rpc "$REFERENCE_RPC" eth_blockNumber)"
+          echo "reference eth_chainId=$chain eth_blockNumber=$head" | tee out/reference-sanity.txt
+          [[ "$chain" == *"$EXPECTED_CHAIN_ID"* ]] || { echo "::error::reference chain ID is not ADI mainnet"; exit 1; }
+
+      - name: Fetch the EN setup repo at the pinned commit
+        run: |
+          mkdir en && cd en
+          git init -q && git remote add origin "https://github.com/${EN_SETUP_REPO}.git"
+          git fetch -q --depth 1 origin "$EN_SETUP_SHA" && git checkout -q FETCH_HEAD
+          git log -1 --format='%H %cI %s' | tee ../out/en-setup-commit.txt
+          grep -n 'EN_VERSION' docker-compose.mainnet.yml | tee ../out/en-compose-pin.txt
+
+      - name: Start the external node pinned to the incident's image tag
+        run: |
+          key="$(openssl rand -hex 32)"           # throwaway P2P identity; generated here so it is never printed
+          echo "::add-mask::$key"
+          echo "EN_KEY=$key" >> "$GITHUB_ENV"
+          cd en
+          export EN_VERSION EXTERNAL_NETWORK_SECRET_KEY="$key"
+          ./external-node.sh start --l1-rpc-url "$L1_RPC_URL" 2>&1 | sed "s/$key/***/g" | tee ../logs/en-start.txt
+          docker ps --format '{{.Names}}  {{.Image}}  {{.Status}}' | tee ../out/en-container.txt
+          docker image inspect --format '{{index .RepoDigests 0}}' \
+            "harbor.sde.adifoundation.ai/ghpc/adi-foundation-labs/server:${EN_VERSION}" | tee ../out/en-image-digest.txt
+
+      - name: Wait for the EN RPC, then confirm its chain ID before comparing anything
+        run: |
+          rpc() { curl -s --max-time 5 -X POST -H 'Content-Type: application/json' \
+                    --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$2\",\"params\":[]}" "$1"; }
+          strip() { sed 's/\x1b\[[0-9;]*m//g' | sed "s/$EN_KEY/***/g"; }
+          resp=""
+          for i in $(seq 1 300); do                 # up to 25 minutes
+            if [ -z "$(docker ps -q -f name=adi_mainnet_external_node)" ]; then
+              echo "::error::EN container is not running"; docker logs --tail 80 adi_mainnet_external_node 2>&1 | strip | cut -c1-300; exit 1
+            fi
+            resp="$(rpc http://127.0.0.1:3050 eth_chainId || true)"
+            [[ "$resp" == *'"result"'* ]] && break
+            sleep 5
+          done
+          [[ "$resp" == *'"result"'* ]] || { echo "::error::EN RPC not ready after 25 min"; docker logs --tail 80 adi_mainnet_external_node 2>&1 | strip | cut -c1-300; exit 1; }
+          echo "EN RPC ready after about $((i * 5))s: $resp  head=$(rpc http://127.0.0.1:3050 eth_blockNumber)" | tee out/en-ready.txt
+          if [[ "$resp" != *"$EXPECTED_CHAIN_ID"* ]]; then
+            echo "::error::EN chain ID does not match ADI mainnet ($EXPECTED_CHAIN_ID): $resp"; exit 1
+          fi
+
+      - name: Start zkdoctor watch in the background (target = local EN, reference = public mainnet)
+        run: |
+          # Health URL: port 3071 is documented in the setup repo README; the path /status/health is the one
+          # documented in the setup repo's issues #17 and #21. It is passed explicitly, never guessed.
+          nohup .venv/bin/zkdoctor watch --rpc http://127.0.0.1:3050 --reference "$REFERENCE_RPC" \
+            --interval 30s --duration "${WATCH_MINUTES}m" --health-url http://127.0.0.1:3071/status/health \
+            --output out/watch-adi-repro.jsonl > logs/watch.txt 2>&1 &
+          echo "WATCH_PID=$!" >> "$GITHUB_ENV"
+          sleep 30; cat logs/watch.txt
+
+      - name: Progress 1
+        run: bash experiments/adi_repro_progress.sh 1 60
+      - name: Progress 2
+        run: bash experiments/adi_repro_progress.sh 2 60
+      - name: Progress 3
+        run: bash experiments/adi_repro_progress.sh 3 60
+      - name: Progress 4
+        run: bash experiments/adi_repro_progress.sh 4 60
+      - name: Progress 5
+        run: bash experiments/adi_repro_progress.sh 5 60
+
+      - name: Collect results
+        if: always()
+        run: |
+          kill -INT "${WATCH_PID:-0}" 2>/dev/null || true; sleep 3
+          strip() { sed 's/\x1b\[[0-9;]*m//g' | sed "s/${EN_KEY:-__none__}/***/g"; }
+          docker logs adi_mainnet_external_node 2>&1 | strip > logs/en-full.log || true
+          tail -n 3000 logs/en-full.log > logs/en.tail.log || true; head -n 60 logs/en-full.log > logs/en.head.log || true
+          rm -f logs/en-full.log
+          { echo "health: $(curl -s -m 5 http://127.0.0.1:3071/status/health || echo unreachable)"
+            echo "EN head: $(curl -s -m 5 -X POST -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' http://127.0.0.1:3050 || echo unreachable)"
+            docker stats --no-stream --format '{{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}}' || true
+            du -sh en/mainnet_data 2>/dev/null || true; df -h / | sed -n '1,2p'; } | tee out/final-state.txt
+          if [ -s out/watch-adi-repro.jsonl ]; then python3 experiments/adi_repro_summary.py out/watch-adi-repro.jsonl; else echo "::warning::no watch output"; fi
+          (cd en && ./external-node.sh down > /dev/null 2>&1) || true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: adi-repro
+          path: |
+            out/
+            logs/
+          if-no-files-found: warn
+          retention-days: 30

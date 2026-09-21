@@ -25,7 +25,8 @@ instead of assuming.
 5. Saves the scan as versioned JSON.
 6. Compares two scans, ignoring dynamic values (block height, timestamps, prices).
 
-It sends no transactions, holds no keys, and does not monitor, alert, score or diagnose.
+It sends no transactions, holds no keys, and does not alert, score or diagnose. (Apart from the
+experimental `watch` command below, it does not monitor either.)
 
 ## Install
 
@@ -138,6 +139,13 @@ Options: `--output/-o FILE`, `--critical METHOD` (repeatable; extra methods whos
 
 An unreachable endpoint is exit 2, never a compatibility failure.
 
+## Experimental: `watch`
+
+`zkdoctor watch --rpc <target> --reference <reference>` polls one target against one reference on
+the same chain and reports when the target stops keeping up (stalled or lagging, optional
+health-check conflict, block-hash divergence). It is a validation experiment for a documented
+failure mode, not a monitoring product. See [docs/watch.md](docs/watch.md).
+
 ## Documentation
 
 | Doc | Contents |
@@ -145,6 +153,7 @@ An unreachable endpoint is exit 2, never a compatibility failure.
 | [docs/schema.md](docs/schema.md) | Scan JSON and evidence format, statuses, redaction |
 | [docs/comparison.md](docs/comparison.md) | What is compared, classification rules, blind spots |
 | [docs/validation.md](docs/validation.md) | Real-testnet validation, docs-vs-node discrepancies, controls |
+| [docs/watch.md](docs/watch.md) | Experimental `watch` command |
 | [docs/architecture.md](docs/architecture.md) | Module layout and design decisions |
 | [docs/sources.md](docs/sources.md) | Official sources, observed behaviour, assumptions |
 | [tests/integration/README.md](tests/integration/README.md) | Optional live-node tests and local-node workflow |
@@ -152,7 +161,7 @@ An unreachable endpoint is exit 2, never a compatibility failure.
 ## Development
 
 ```bash
-uv run pytest                                  # 84 tests, localhost only
+uv run pytest                                  # 118 tests, localhost only
 ZKDOCTOR_INTEGRATION_RPC=https://zksync-os-testnet-alpha.zksync.dev/ \
   uv run pytest tests/integration              # 3 live tests
 ```

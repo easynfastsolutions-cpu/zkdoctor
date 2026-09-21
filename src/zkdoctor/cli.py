@@ -19,6 +19,7 @@ from .discovery import DiscoveryAborted
 from .evidence import ScanFileError, load_scan, save_scan
 from .probes import run_scan
 from .report import render_comparison, render_scan
+from .watch import Thresholds, WatchConfigError, make_health_probe, parse_duration, run_watch
 
 app = typer.Typer(
     add_completion=False,
@@ -119,6 +120,50 @@ def compare(
     else:
         render_comparison(result, out)
     raise typer.Exit(1 if result.summary["breaking"] else 0)
+
+
+_WATCH_STYLE = {"PASS": "green", "WARN": "yellow", "FAIL": "bold red", "ERROR": "red", "INFO": "dim"}
+
+
+@app.command()
+def watch(
+    rpc: Annotated[str, typer.Option("--rpc", help="Target endpoint to watch.")],
+    reference: Annotated[str, typer.Option("--reference", help="Reference endpoint on the same chain.")],
+    interval: Annotated[str, typer.Option(help="Time between polls, e.g. 30s, 2m.")] = "30s",
+    output: Annotated[Path | None, typer.Option("--output", "-o", help="Append JSONL records here.")] = None,
+    lag_warn_blocks: Annotated[int, typer.Option(help="WARN when the target is more than this many blocks behind.")] = 2,
+    stale_warn: Annotated[str, typer.Option(help="WARN when the target height is unchanged for longer than this.")] = "60s",
+    stale_fail: Annotated[str, typer.Option(help="FAIL when unchanged for at least this long while the reference advances.")] = "300s",
+    fail_after: Annotated[int, typer.Option(help="Consecutive FAIL polls before exiting non-zero.")] = 2,
+    health_url: Annotated[
+        str | None, typer.Option("--health-url", help="Target status URL to record (never guessed; omit if none).")
+    ] = None,
+    timeout: Annotated[float, typer.Option(help="Per-request timeout in seconds.")] = 10.0,
+    max_polls: Annotated[int | None, typer.Option(help="Stop after this many polls.")] = None,
+    duration: Annotated[str | None, typer.Option(help="Stop after this long, e.g. 10m.")] = None,
+) -> None:
+    """EXPERIMENTAL: does the target keep up with the reference? (block progression, state agreement)"""
+    try:
+        thresholds = Thresholds(lag_warn_blocks, parse_duration(stale_warn), parse_duration(stale_fail), fail_after)
+        interval_s = parse_duration(interval)
+        duration_s = parse_duration(duration) if duration else None
+        target_client, reference_client = RpcClient(rpc, timeout=timeout), RpcClient(reference, timeout=timeout)
+        health = make_health_probe(health_url, timeout) if health_url else None
+    except (ValueError, WatchConfigError) as exc:
+        raise _fail(str(exc)) from None
+    try:
+        result = run_watch(
+            target_client, reference_client, thresholds, interval_s, output=output, health=health,
+            health_url=health_url, max_polls=max_polls, duration_s=duration_s,
+            emit=lambda status, line: out.print(line, style=_WATCH_STYLE.get(status), soft_wrap=True, markup=False, highlight=False),
+        )
+    except WatchConfigError as exc:
+        raise _fail(str(exc)) from None
+    finally:
+        target_client.close()
+        reference_client.close()
+    out.print(f"watch ended: {result.reason} after {result.polls} polls (exit {result.exit_code})", markup=False)
+    raise typer.Exit(result.exit_code)
 
 
 if __name__ == "__main__":  # pragma: no cover
