@@ -52,6 +52,7 @@ class Thresholds:
     stale_warn_s: float = 60.0
     stale_fail_s: float = 300.0
     fail_after: int = 2  # consecutive FAIL polls before a non-zero exit
+    unreachable_after: int = 10  # consecutive target errors (reference answering) before FAIL; 0 disables
 
     def validate(self) -> None:
         if self.lag_warn_blocks < 0:
@@ -60,6 +61,8 @@ class Thresholds:
             raise WatchConfigError("--stale-warn must be > 0 and <= --stale-fail")
         if self.fail_after < 1:
             raise WatchConfigError("--fail-after must be >= 1")
+        if self.unreachable_after < 0:
+            raise WatchConfigError("--unreachable-after must be >= 0 (0 disables it)")
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -67,6 +70,7 @@ class Thresholds:
             "stale_warn_s": self.stale_warn_s,
             "stale_fail_s": self.stale_fail_s,
             "fail_after": self.fail_after,
+            "unreachable_after": self.unreachable_after,
         }
 
 
@@ -246,6 +250,7 @@ class Tracker:
         self._gap = {"target": False, "reference": False}
         self._last: dict[str, int | None] = {"target": None, "reference": None}
         self.fail_streak = 0
+        self._unreachable = 0  # consecutive polls: target failed while the reference answered
 
     def _track(self, side: str, other: str, height: int | None, other_height: int | None, now: float) -> bool | None:
         if height is None:
@@ -280,12 +285,30 @@ class Tracker:
         def add(code: str, status: str, message: str) -> None:
             findings.append({"code": code, "status": status, "message": message})
 
+        if target is not None:
+            self._unreachable = 0
         if target is None or reference is None:
             for side, height in (("target", target), ("reference", reference)):
                 if height is None:
                     detail = (errors or {}).get(side) or "no height"
                     add("RPC_ERROR", "ERROR", f"{side} height unavailable: {detail} (not treated as a stall)")
-            return Assessment("ERROR", findings, None, t_changed, r_changed, None, None, self.fail_streak)
+            # One error is not a stall, but errors that never stop must escalate ("dead", not "stalled").
+            # Only polls where the reference answers count: if it is down too, nothing can be said about the
+            # target, so such polls neither count nor reset.
+            if target is None and reference is not None and th.unreachable_after > 0:
+                self._unreachable += 1
+                if self._unreachable >= th.unreachable_after:
+                    add(
+                        "TARGET_UNREACHABLE_SUSTAINED", "FAIL",
+                        f"target failed {self._unreachable} consecutive polls (threshold {th.unreachable_after}) "
+                        f"while the reference is reachable: {(errors or {}).get('target') or 'no height'}",
+                    )
+            failed = any(f["status"] == "FAIL" for f in findings)
+            if failed:
+                self.fail_streak += 1
+            return Assessment(
+                "FAIL" if failed else "ERROR", findings, None, t_changed, r_changed, None, None, self.fail_streak
+            )
 
         ta, ra = self._anchor["target"], self._anchor["reference"]
         assert ta is not None and ra is not None
@@ -509,7 +532,8 @@ def replay(path: Path) -> list[dict[str, Any]]:
             continue
         rec = json.loads(line)
         if rec.get("kind") == "meta":
-            tracker = Tracker(Thresholds(**rec["thresholds"]))
+            # files written before `unreachable_after` existed were recorded without that escalation
+            tracker = Tracker(Thresholds(**{"unreachable_after": 0, **rec["thresholds"]}))
         elif rec.get("kind") == "poll" and tracker is not None:
             health = rec["health"]["status"]
             a = tracker.update(

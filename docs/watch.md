@@ -19,6 +19,7 @@ zkdoctor watch --rpc <target> --reference <reference> --interval 30s --output wa
 | `--stale-warn` | `60s` | WARN when the target height has been unchanged for longer than this |
 | `--stale-fail` | `300s` | FAIL when unchanged for at least this long **while the reference advanced** |
 | `--fail-after` | `2` | consecutive FAIL polls before exiting non-zero |
+| `--unreachable-after` | `10` | FAIL after this many consecutive polls where the target errors while the reference answers; `0` disables |
 | `--health-url` | none | a status URL **you provide**; never guessed |
 | `--output` | none | append JSONL here (earlier records are never rewritten) |
 | `--max-polls`, `--duration` | none | bound the run |
@@ -42,7 +43,8 @@ error (exit 2)** and nothing else is asked.
 | `TARGET_STALLED` | WARN, then FAIL | target unchanged for `> stale-warn` (FAIL at `>= stale-fail`) **and the reference advanced in that window** |
 | `BOTH_STALLED` | WARN (never FAIL) | neither advanced: a quiet chain or both down; says nothing specific about the target |
 | `REFERENCE_STALLED` | WARN | reference unchanged for `> stale-warn` while the target advanced |
-| `RPC_ERROR` | ERROR | a height could not be read. Never a stall and never a FAIL |
+| `RPC_ERROR` | ERROR | a height could not be read. On its own never a stall and never a FAIL |
+| `TARGET_UNREACHABLE_SUSTAINED` | FAIL | the target failed `--unreachable-after` consecutive polls while the reference answered. "Dead", as distinct from "stalled but alive" |
 | `HEALTH_CHECK_FALSE_POSITIVE` | FAIL | a provided health check says healthy AND the target has been unchanged for `>= stale-fail` AND the reference advanced. It reports a conflict between two signals, not that the health check is wrong in general |
 | `STATE_DIVERGENCE` | FAIL | different block hashes at the same height. Not called a fork |
 
@@ -52,6 +54,12 @@ recorded as `SKIP`/not collected and never affects the status.
 **Conservative choices**
 - An RPC error resets that node's stale timer, so a stall is only asserted from consecutive
   successful observations. A flaky endpoint can therefore hide a real stall.
+- Errors escalate only when they never stop: `TARGET_UNREACHABLE_SUSTAINED` needs
+  `--unreachable-after` (default 10) consecutive polls in which the target fails **and the
+  reference answers**. A poll where the reference is down too says nothing about the target: it
+  neither counts nor resets. Any successful target poll resets the count. The poll status is FAIL
+  from the threshold on, so with `--fail-after 2` the run exits after `unreachable-after + 1`
+  consecutive error polls (about 5.5 minutes at the defaults).
 - Staleness is measured at poll times, so detection latency is up to one `--interval`.
 - On a low-traffic chain blocks can be a minute apart. Use a reference and thresholds suited to
   the chain, and read `BOTH_STALLED` as "cannot tell".
@@ -61,10 +69,11 @@ recorded as `SKIP`/not collected and never affects the status.
 ## Exit codes
 
 `0` no sustained FAIL (including a bounded run that ended, or Ctrl-C) · `1` `--fail-after`
-consecutive FAIL polls · `2` tool/configuration error (bad arguments, unreachable node at start,
+consecutive FAIL polls (a stall, a health conflict, a hash divergence, or a target that stays
+unreachable) · `2` tool/configuration error (bad arguments, unreachable node at start,
 chain ID mismatch, unwritable output, or a bounded run with no usable observation).
-A transient timeout, an unsupported optional method, missing peer count and ordinary height
-differences never cause a non-zero exit.
+A transient timeout (fewer than `--unreachable-after` consecutive errors), an unsupported optional
+method, missing peer count and ordinary height differences never cause a non-zero exit.
 
 ## JSONL
 
@@ -79,7 +88,16 @@ A `poll` record holds: `timestamp`, `t` (epoch seconds), `status`, `findings[]`,
 `state_check` (common height, both hashes, both hash-request evidence), `health` and `peer_count`.
 
 The classification is a pure function of these records: `zkdoctor.watch.replay(path)` recomputes
-every poll's status and findings offline, with no network access.
+every poll's status and findings offline, with no network access. A file written before
+`unreachable_after` existed (no such key in its `meta` thresholds) replays with that escalation
+disabled, as it was recorded.
+
+## Why `TARGET_UNREACHABLE_SUSTAINED` exists
+
+A live run against ADI mainnet (2026-09-21, [run 35577380179](https://github.com/easynfastsolutions-cpu/zkdoctor/actions/runs/35577380179))
+watched a locally run external node whose container exited after about 2.5 hours. `watch` recorded
+`RPC_ERROR` on 269 consecutive polls (2 h 18 min) and exited 0, because a single error is
+deliberately not a failure and nothing escalated errors that never stopped.
 
 ## Not implemented (deliberately)
 

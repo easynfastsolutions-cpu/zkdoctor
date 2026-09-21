@@ -242,14 +242,111 @@ def test_a_bounded_run_with_no_usable_observation_is_a_tool_error_not_a_pass(tmp
     assert end[-1]["exit_code"] == 2
 
 
-def test_errors_alone_never_reach_a_sustained_fail(tmp_path):
+def test_errors_alone_never_fail_when_the_unreachable_escalation_is_disabled(tmp_path):
     def script(step, t, r):
         t.down = step >= 1  # the target goes away right after the first poll
 
-    result, _ = run_sim(SimNode(), SimNode(), polls=30, script=script, output=tmp_path / "w.jsonl")
+    result, _ = run_sim(SimNode(), SimNode(), polls=30, script=script, thresholds=Thresholds(unreachable_after=0),
+                        output=tmp_path / "w.jsonl")
     _, polls, _ = read(tmp_path / "w.jsonl")
     assert polls[0]["status"] == "PASS" and {p["status"] for p in polls[1:]} == {"ERROR"}
-    assert result.exit_code == 0 and result.polls == 30  # 29 error polls never became a FAIL
+    assert result.exit_code == 0 and result.polls == 30  # 29 error polls, none escalated (opt-out)
+
+
+# ------------------------------------------------ sustained unreachability (found by the live ADI run)
+# Live run 35577380179: the target's container exited and `watch` recorded 269 consecutive RPC_ERROR polls
+# (2h18m) but exited 0. A single error is not a stall, but errors that never stop must escalate.
+
+
+def dead_after_first_poll(step, target, reference):
+    target.down = step >= 1
+
+
+def test_sustained_target_unreachability_escalates_and_exits_non_zero(tmp_path):
+    result, lines = run_sim(SimNode(), SimNode(), polls=60, script=dead_after_first_poll, output=tmp_path / "w.jsonl")
+    _, polls, _ = read(tmp_path / "w.jsonl")
+    assert polls[0]["status"] == "PASS"
+    assert polls[9]["seq"] == 10 and polls[9]["status"] == "ERROR" and codes(polls[9]) == ["RPC_ERROR"]  # 9th error
+    first = polls[10]  # the 10th consecutive error
+    assert first["seq"] == 11 and first["status"] == "FAIL"
+    assert codes(first) == ["RPC_ERROR", "TARGET_UNREACHABLE_SUSTAINED"]
+    message = first["findings"][1]["message"]
+    assert "10 consecutive polls" in message and "reference is reachable" in message
+    assert first["fail_streak"] == 1 and polls[11]["fail_streak"] == 2
+    assert result.exit_code == 1 and result.reason == "sustained_fail" and result.polls == 12
+    assert "TARGET_UNREACHABLE_SUSTAINED" in lines[-1][1] and lines[-1][0] == "FAIL"
+
+
+def test_unreachable_threshold_is_configurable_and_zero_disables_it(tmp_path):
+    result, _ = run_sim(SimNode(), SimNode(), polls=60, script=dead_after_first_poll,
+                        thresholds=Thresholds(unreachable_after=3), output=tmp_path / "w.jsonl")
+    _, polls, _ = read(tmp_path / "w.jsonl")
+    assert "TARGET_UNREACHABLE_SUSTAINED" not in codes(polls[2]) and "TARGET_UNREACHABLE_SUSTAINED" in codes(polls[3])
+    assert result.exit_code == 1 and result.polls == 5  # error polls 2,3,4 -> FAIL at 4, and again at 5
+    result, _ = run_sim(SimNode(), SimNode(), polls=30, script=dead_after_first_poll, thresholds=Thresholds(unreachable_after=0))
+    assert result.exit_code == 0 and result.polls == 30
+    with pytest.raises(WatchConfigError):
+        Thresholds(unreachable_after=-1).validate()
+
+
+def test_a_transient_outage_shorter_than_the_threshold_never_escalates_and_recovery_resets_the_count(tmp_path):
+    def script(step, t, r):
+        t.down = (1 <= step <= 9) or (11 <= step <= 19)  # two outages of 9 polls, one good poll between them
+
+    result, _ = run_sim(SimNode(), SimNode(), polls=24, script=script, output=tmp_path / "w.jsonl")
+    _, polls, _ = read(tmp_path / "w.jsonl")
+    assert sum(p["status"] == "ERROR" for p in polls) == 18
+    assert not any("TARGET_UNREACHABLE_SUSTAINED" in codes(p) for p in polls)
+    assert result.exit_code == 0 and result.polls == 24
+
+
+def test_only_polls_where_the_reference_answers_count_toward_unreachability(tmp_path):
+    def script(step, t, r):
+        t.down = step >= 1
+        r.down = 1 <= step <= 5  # polls 2-6: both unreachable -> ambiguous, neither counted nor reset
+
+    run_sim(SimNode(), SimNode(), polls=30, script=script, output=tmp_path / "w.jsonl")
+    _, polls, _ = read(tmp_path / "w.jsonl")
+    first = next(p for p in polls if "TARGET_UNREACHABLE_SUSTAINED" in codes(p))
+    assert first["seq"] == 16  # counted polls are 7..16, the 10th consecutive one
+    assert all(codes(p) == ["RPC_ERROR", "RPC_ERROR"] for p in polls[1:6])
+
+
+def test_both_nodes_unreachable_never_escalates_the_target(tmp_path):
+    def script(step, t, r):
+        t.down = r.down = step >= 1
+
+    result, _ = run_sim(SimNode(), SimNode(), polls=30, script=script, output=tmp_path / "w.jsonl")
+    _, polls, _ = read(tmp_path / "w.jsonl")
+    assert {p["status"] for p in polls[1:]} == {"ERROR"}
+    assert not any("TARGET_UNREACHABLE_SUSTAINED" in codes(p) for p in polls)
+    assert result.exit_code == 0  # nothing can be said about the target while the reference is also down
+
+
+def test_dead_and_stalled_are_distinct_failure_modes(tmp_path):
+    run_sim(SimNode(), SimNode(), polls=20, script=dead_after_first_poll, output=tmp_path / "dead.jsonl")
+    _, dead, _ = read(tmp_path / "dead.jsonl")
+    assert not any(c in codes(p) for p in dead for c in ("TARGET_STALLED", "BOTH_STALLED", "HEALTH_CHECK_FALSE_POSITIVE"))
+    run_sim(SimNode(), SimNode(), polls=14, script=frozen_target_script, output=tmp_path / "frozen.jsonl")
+    _, frozen, _ = read(tmp_path / "frozen.jsonl")
+    assert any("TARGET_STALLED" in codes(p) for p in frozen)
+    assert not any("TARGET_UNREACHABLE_SUSTAINED" in codes(p) or "RPC_ERROR" in codes(p) for p in frozen)
+
+
+def test_unreachable_setting_is_recorded_and_the_run_replays_offline(tmp_path):
+    out = tmp_path / "w.jsonl"
+    run_sim(SimNode(), SimNode(), polls=60, script=dead_after_first_poll, output=out)
+    meta, polls, _ = read(out)
+    assert meta[0]["thresholds"]["unreachable_after"] == 10
+    replayed = replay(out)
+    assert [(r["seq"], r["status"], r["codes"]) for r in replayed] == [(p["seq"], p["status"], codes(p)) for p in polls]
+    # a JSONL written before this setting existed replays with the escalation disabled, as it was recorded
+    lines = out.read_text(encoding="utf-8").splitlines()
+    old_meta = json.loads(lines[0])
+    del old_meta["thresholds"]["unreachable_after"]
+    old = tmp_path / "old.jsonl"
+    old.write_text(chr(10).join([json.dumps(old_meta)] + lines[1:]) + chr(10), encoding="utf-8")
+    assert {r["status"] for r in replay(old)[1:]} == {"ERROR"}
 
 
 # ---------------------------------------------------------------- health mismatch
@@ -410,7 +507,8 @@ def test_jsonl_has_a_metadata_record_then_one_record_per_poll(tmp_path):
     assert meta["schema"] == "zkdoctor-watch/0.1" and meta["watch_version"] == "0.1-experimental"
     assert meta["target"]["chain_id"] == 506 == meta["reference"]["chain_id"] == meta["chain_id"]
     assert meta["target"]["evidence"]["method"] == "eth_chainId"
-    assert meta["thresholds"] == {"lag_warn_blocks": 4, "stale_warn_s": 90, "stale_fail_s": 600, "fail_after": 3}
+    assert meta["thresholds"] == {"lag_warn_blocks": 4, "stale_warn_s": 90, "stale_fail_s": 600, "fail_after": 3,
+                                  "unreachable_after": 10}
     assert meta["interval_s"] == 15.0 and meta["started"].endswith("Z")
     assert meta["health"]["configured"] is False
     assert [json.loads(line)["seq"] for line in out.read_text().splitlines()[1:6]] == [1, 2, 3, 4, 5]
@@ -545,6 +643,34 @@ def test_cli_chain_mismatch_and_bad_configuration_are_tool_errors(tmp_path):
     assert cli("watch", "--rpc", "not-a-url", "--reference", "http://x.test").exit_code == 2
     assert cli("watch", "--rpc", "http://127.0.0.1:1", "--reference", "http://127.0.0.1:1", "--timeout", "1").exit_code == 2
     assert cli("watch", "--rpc", "http://x.test").exit_code == 2  # --reference is required
+
+
+def test_cli_unreachable_after_option_is_available_and_validated():
+    assert "--unreachable-after" in cli("watch", "--help").output
+    with FakeChain(generic_methods(chain_id=506)).serve() as a:
+        bad = cli("watch", "--rpc", a, "--reference", a, "--unreachable-after", "-1", "--max-polls", "1")
+    assert bad.exit_code == 2 and "--unreachable-after" in bad.output
+
+
+def test_cli_target_that_starts_failing_mid_run_exits_non_zero(tmp_path):
+    """End to end over real HTTP: healthy at start, then every height request fails while the reference answers."""
+    from conftest import RpcFail
+
+    calls = {"n": 0}
+
+    def head_then_fail(_params):
+        calls["n"] += 1
+        return hex(500) if calls["n"] == 1 else RpcFail(-32000, "backend unavailable")
+
+    target_methods = {**generic_methods(chain_id=506), "eth_blockNumber": head_then_fail}
+    out = tmp_path / "w.jsonl"
+    with FakeChain(target_methods).serve() as target, FakeChain(generic_methods(block=900, chain_id=506)).serve() as ref:
+        result = cli("watch", "--rpc", target, "--reference", ref, "--interval", "20ms", "--unreachable-after", "3",
+                     "--max-polls", "30", "--output", str(out))
+    assert result.exit_code == 1, result.output
+    assert "TARGET_UNREACHABLE_SUSTAINED" in result.output and "sustained_fail" in result.output
+    _, polls, _ = read(out)
+    assert polls[0]["status"] != "FAIL" and len(polls) == 5  # error polls 2,3,4 -> FAIL at 4, again at 5
 
 
 def test_cli_transient_and_optional_failures_do_not_cause_non_zero(tmp_path):

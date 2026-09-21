@@ -135,6 +135,10 @@ def watch(
     stale_warn: Annotated[str, typer.Option(help="WARN when the target height is unchanged for longer than this.")] = "60s",
     stale_fail: Annotated[str, typer.Option(help="FAIL when unchanged for at least this long while the reference advances.")] = "300s",
     fail_after: Annotated[int, typer.Option(help="Consecutive FAIL polls before exiting non-zero.")] = 2,
+    unreachable_after: Annotated[
+        int,
+        typer.Option(help="FAIL after this many consecutive polls where the target is unreachable while the reference answers (0 disables)."),
+    ] = 10,
     health_url: Annotated[
         str | None, typer.Option("--health-url", help="Target status URL to record (never guessed; omit if none).")
     ] = None,
@@ -144,7 +148,9 @@ def watch(
 ) -> None:
     """EXPERIMENTAL: does the target keep up with the reference? (block progression, state agreement)"""
     try:
-        thresholds = Thresholds(lag_warn_blocks, parse_duration(stale_warn), parse_duration(stale_fail), fail_after)
+        thresholds = Thresholds(
+            lag_warn_blocks, parse_duration(stale_warn), parse_duration(stale_fail), fail_after, unreachable_after
+        )
         interval_s = parse_duration(interval)
         duration_s = parse_duration(duration) if duration else None
         target_client, reference_client = RpcClient(rpc, timeout=timeout), RpcClient(reference, timeout=timeout)
