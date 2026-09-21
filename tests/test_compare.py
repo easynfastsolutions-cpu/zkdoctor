@@ -100,6 +100,16 @@ def test_new_unknown_field_is_added_not_breaking():
     assert cmp.summary["breaking"] == 0
 
 
+def test_array_to_object_change_in_genesis_is_still_reported():
+    """Softening the probe status must not hide the structural difference between deployments."""
+    target = os_methods()
+    target["zks_getGenesis"] = {**load("genesis.json"), "additional_storage": {"0x" + "11" * 20: {"0x01": "0x02"}}}
+    cmp = diffs_of(os_methods(), target)
+    [d] = find(cmp, "ZKS-001", "additional_storage")
+    assert d.change == Change.CHANGED and d.impact == Impact.BREAKING
+    assert (d.baseline, d.target) == ("array", "object")
+
+
 def test_null_to_value_flip_is_not_a_type_change():
     baseline, target = era_methods(), era_methods()
     good = baseline["zks_getL1BatchDetails"]

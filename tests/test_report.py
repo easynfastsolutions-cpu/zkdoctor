@@ -87,6 +87,15 @@ def run_cli(*args):
     return runner.invoke(app, list(args))
 
 
+def test_version_flag_prints_version_and_exits_zero():
+    from zkdoctor import __version__
+
+    result = run_cli("--version")
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == f"zkdoctor {__version__}"
+    assert "Missing command" not in result.output
+
+
 def test_help_screens_work():
     for args in (["--help"], ["scan", "--help"], ["compare", "--help"]):
         result = run_cli(*args)

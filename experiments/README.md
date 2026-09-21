@@ -30,3 +30,19 @@ is not automatically a compatibility break. `summarize.py` prints raw facts only
 classification is done by reading them.
 
 The workflow runs on `workflow_dispatch` and on pushes that touch it.
+
+## Result (2026-09-21, run 35568950248)
+
+Both releases started (L2 RPC ready in 1.02 s each) and were scanned by the unmodified
+V0.1. The comparison reported exactly one difference, the client version
+(`zksync-os/v0.20.12` -> `zksync-os/v0.23.0`, WARNING); chain ID, genesis root, execution
+version, capabilities and all 11 response shapes were identical. That is a neutral result:
+either the versions behave the same on the probed surface, or the probes are too shallow.
+See `docs/validation.md`, section 5.
+
+The run also exposed two V0.1 defects (`zkdoctor --version`, and a too-strict genesis
+check), fixed in V0.1.1. Re-running this workflow on V0.1.1 is the check that the genesis
+scan of the two local servers is now a WARN instead of a FAIL.
+
+Note: check-run annotations are limited to 4,096 characters, so the full scan JSON is only
+available from the run's artifacts.

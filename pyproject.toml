@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zkdoctor"
-version = "0.1.0"
+version = "0.1.1"
 description = "ZKsync Compatibility Doctor: scan a ZKsync RPC endpoint and compare two scans for compatibility differences."
 readme = "README.md"
 license = { file = "LICENSE" }

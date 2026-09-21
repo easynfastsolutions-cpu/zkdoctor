@@ -232,3 +232,57 @@ def test_block_metadata_is_queried_with_an_integer_not_hex():
     chain = FakeChain(real_testnet_methods(block=504553))
     run_scan(RpcClient("http://node.test", transport=chain.transport()))
     assert ("zks_getBlockMetadataByNumber", [504553]) in chain.calls
+
+
+# ------------------------------------- V0.1.1: genesis shape handling (docs vs observed deployment)
+
+GENESIS_STORAGE_OBJECT = {"0x" + "11" * 20: {"0x01": "0x02"}}  # observed locally on zksync-os v0.20.12 / v0.23.0
+
+
+def genesis_result(**changes):
+    genesis = {**load("genesis.json"), **changes}
+    genesis = {k: v for k, v in genesis.items() if v is not ...}
+    methods = os_methods()
+    methods["zks_getGenesis"] = genesis
+    return by_id(scan_of(methods))["ZKS-001"]
+
+
+def test_genesis_documented_array_passes():
+    assert genesis_result().status == Status.PASS
+
+
+def test_genesis_additional_storage_observed_object_is_warn_not_fail():
+    result = genesis_result(additional_storage=GENESIS_STORAGE_OBJECT)
+    assert result.status == Status.WARN
+    assert result.severity.value == "WARNING"
+    assert any("documented as array, observed object" in d for d in result.details)
+
+
+def test_genesis_observed_object_shape_is_preserved_in_evidence():
+    shape = genesis_result(additional_storage=GENESIS_STORAGE_OBJECT).evidence.result_summary["shape"]
+    assert isinstance(shape["additional_storage"], dict)  # the discrepancy is recorded, not normalised away
+    array_shape = genesis_result().evidence.result_summary["shape"]
+    assert isinstance(array_shape["additional_storage"], list)
+
+
+def test_genesis_missing_required_structural_data_still_fails():
+    assert genesis_result(genesis_root=...).status == Status.FAIL
+    assert genesis_result(initial_contracts=...).status == Status.FAIL
+    assert genesis_result(genesis_root="not-a-hash").status == Status.FAIL
+
+
+def test_genesis_unusable_additional_storage_still_fails():
+    for bad in ("nope", 12, True):
+        assert genesis_result(additional_storage=bad).status == Status.FAIL, bad
+
+
+def test_genesis_missing_additional_storage_is_warn():
+    result = genesis_result(additional_storage=...)
+    assert result.status == Status.WARN
+    assert any("'additional_storage' is absent" in d for d in result.details)
+
+
+def test_genesis_response_that_is_not_an_object_still_fails():
+    methods = os_methods()
+    methods["zks_getGenesis"] = ["not", "an", "object"]
+    assert by_id(scan_of(methods))["ZKS-001"].status == Status.FAIL

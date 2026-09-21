@@ -140,6 +140,30 @@ def _validate_block_range(result: Any) -> Validation:
     return v
 
 
+def _validate_genesis(result: Any) -> Validation:
+    """Structure the genesis is unusable without -> FAIL. Deployment differences from the docs -> WARN.
+
+    `additional_storage` is documented as an array. Observed: an array on the public testnet
+    (zksync-os/v0.24.0) but an object on local zksync-os v0.20.12 and v0.23.0. Both are usable, so
+    an object is a WARN; the observed shape is kept in the evidence. `execution_version` is
+    documented but absent from real responses (WARN).
+    """
+    v = check_object(
+        result,
+        {"initial_contracts": "array", "genesis_root": "hash32"},
+        documented={"execution_version": "uint"},
+    )
+    if not isinstance(result, dict):
+        return v
+    if "additional_storage" not in result:
+        v.warnings.append("documented field 'additional_storage' is absent")
+    elif isinstance(result["additional_storage"], dict):
+        v.warnings.append("field 'additional_storage' documented as array, observed object")
+    elif not isinstance(result["additional_storage"], list):
+        v.problems.append(f"field 'additional_storage' should be array, got {type_name(result['additional_storage'])}")
+    return v
+
+
 def _validate_bridgehub(result: Any) -> Validation:
     # Response shape not confirmed in the docs; accept a string and warn if not an address.
     v = check_scalar(result, "string")
@@ -156,15 +180,7 @@ PROBES: list[ProbeSpec] = [
     ),
     ProbeSpec("RPC-003", "client version", "generic", "web3_clientVersion", lambda r: check_scalar(r, "string")),
     ProbeSpec("RPC-004", "net version", "generic", "net_version", _validate_net_version),
-    ProbeSpec(
-        "ZKS-001", "genesis", "zksync", "zks_getGenesis",
-        lambda r: check_object(
-            r,
-            {"initial_contracts": "array", "additional_storage": "array", "genesis_root": "hash32"},
-            documented={"execution_version": "uint"},  # absent on zksync-os/v0.24.0 (testnet)
-        ),
-        os_documented=True,
-    ),
+    ProbeSpec("ZKS-001", "genesis", "zksync", "zks_getGenesis", _validate_genesis, os_documented=True),
     ProbeSpec(
         "ZKS-002", "block metadata", "zksync", "zks_getBlockMetadataByNumber",
         lambda r: check_object(

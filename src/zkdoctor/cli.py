@@ -34,11 +34,21 @@ def _fail(message: str) -> typer.Exit:
     return typer.Exit(2)
 
 
-@app.callback()
-def _main(version: Annotated[bool, typer.Option("--version", help="Show version and exit.")] = False) -> None:
-    if version:
+def _print_version(value: bool) -> None:
+    if value:
         out.print(f"zkdoctor {__version__}")
         raise typer.Exit(0)
+
+
+@app.callback()
+def _main(
+    version: Annotated[
+        bool,
+        # eager: must run before click demands a subcommand, or `zkdoctor --version` exits 2
+        typer.Option("--version", callback=_print_version, is_eager=True, help="Show version and exit."),
+    ] = False,
+) -> None:
+    pass
 
 
 @app.command()

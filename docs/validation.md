@@ -82,14 +82,74 @@ Searched official sources for a second public ZKsync OS environment. None found:
 
 No endpoint was guessed or probed beyond the one the docs publish.
 
-## 5. Not established
+## 5. Real server versions A vs B (GitHub Actions)
 
-- **A real version A → version B comparison.** Not done. A local run needs Linux (the
-  server publishes no Windows binary), Foundry's `anvil`, and each release's
-  `local-chains` bundle. It was not attempted on the development machine because the
-  system drive had too little free space. Server releases up to `v0.23.0` reference
-  ZKsync OS `v0.4.0`; testing OS `v0.5.0` probably needs a newer or source-built server
-  (inference from release notes, unverified).
-- Behaviour on other ZKsync OS deployments, or on EraVM chains (the EraVM-documented
-  probes, ZKS-003 to ZKS-006, have only been exercised against fake responses).
-- Customer demand.
+Workflow: [`.github/workflows/version-experiment.yml`](../.github/workflows/version-experiment.yml),
+description in [`experiments/README.md`](../experiments/README.md). Each release runs on its
+own GitHub-hosted Ubuntu runner (4 vCPU, 16 GB) with Anvil 1.5.1 as L1; RPC is localhost-only.
+Download integrity was verified against the SHA-256 digests GitHub publishes.
+
+| | A | B |
+|---|---|---|
+| Server release | `v0.20.12` (commit `027ef1f6…`) | `v0.23.0` (commit `610bfa2b…`) |
+| Local-chain protocol / config | `v31.0`, `default/config.yaml` (chain ID 506); identical files at both tags | same |
+| L2 RPC ready after start | 1.02 s | 1.02 s |
+| Server peak memory | about 259 MB | about 272 MB |
+
+Both scans were identical: chain ID 506, `net_version` `0x1fa`, execution version 6 (from
+block metadata), the same genesis root, the same capabilities (`zks_getGenesis`,
+`zks_getBlockMetadataByNumber`, `zks_getBridgehubContract` supported; the four EraVM batch
+methods unsupported) and the same response shapes.
+
+`zkdoctor compare A B`: **one difference**, `client_version` `zksync-os/v0.20.12` →
+`zksync-os/v0.23.0` (WARNING, expected by definition). 0 breaking, 11 probes unchanged.
+
+Classification: server/version 1 (the client version); local-chain/genesis 0; capability 0;
+schema 0; dynamic/runtime 0; unknown 0.
+
+**This is a neutral result.** It shows the pipeline works on real servers and produces no
+false positives from runtime state. It does not show that ZKDoctor can detect a real
+compatibility break, because these two releases did not differ on anything V0 probes.
+v0.23.0's release notes mention new stable batch RPC methods that V0 does not probe.
+
+### Cross-environment observations (not part of A vs B)
+
+| Item | Public testnet `v0.24.0` | Local `v0.20.12` / `v0.23.0` |
+|---|---|---|
+| `zks_getGenesis.additional_storage` | array (empty) | object |
+| `zks_getGenesis.execution_version` | absent | absent |
+| `zks_getBlockMetadataByNumber.execution_version` | absent | present (6) |
+| `net_version` | hex | hex |
+
+These are different versions and configs, so they show deployment diversity, not a
+regression. Docs say `additional_storage` is an array.
+
+## 6. V0.1.1 fixes
+
+Found by the runs above:
+
+1. `zkdoctor --version` exited 2 with "Missing command" (the option was not eager). Fixed;
+   regression test added.
+2. ZKS-001 returned **FAIL** for the local servers because `additional_storage` was an object
+   where the docs say array. The genesis is usable, so this is now a **WARN**
+   ("documented as array, observed object") with the observed shape kept in the evidence.
+   Still FAIL: response not an object, `initial_contracts` or `genesis_root` missing or
+   malformed, `additional_storage` neither array nor object. Missing `additional_storage`
+   is a WARN.
+3. `compare` crashed with `TypeError: unhashable type: 'list'` when a field changed between
+   an array and an object (for example testnet vs local genesis). Found by the regression
+   test for fix 2. Fixed; an array → object change is still reported as BREAKING.
+
+Re-scan of the public testnet with V0.1.1
+([`2026-09-21-testnet-v0.1.1/scan.json`](validation/2026-09-21-testnet-v0.1.1/scan.json)):
+4 PASS, 3 WARN, 0 FAIL, 4 SKIP, exit 0; compared with the 2026-09-20 scan: no differences.
+
+## 7. Not established
+
+- Detection of a **real** compatibility difference between two versions. The pair tested
+  showed none on the probed surface.
+- Whether a ZKsync OS v0.4.0 vs v0.5.0 difference is visible: no released server embeds
+  v0.5.0 as far as could be determined.
+- Behaviour on other ZKsync OS deployments, or on EraVM chains (ZKS-003 to ZKS-006 have only
+  been run against fake responses).
+- Customer demand, and whether this duplicates official ZKsync tooling.

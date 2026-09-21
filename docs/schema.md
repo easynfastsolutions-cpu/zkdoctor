@@ -60,6 +60,11 @@ Field tiers per schema: **required** (missing or wrong type → `FAIL`), **docum
 (absent or wrong type → `WARN`), **optional** (wrong type → `WARN`, absence ignored).
 Fields the docs do not mention are always ignored.
 
+`zks_getGenesis` (V0.1.1): `initial_contracts` (array) and `genesis_root` (32-byte hash) are
+required. `additional_storage` is documented as an array; an object is accepted as a `WARN`
+("documented as array, observed object") because real local servers return one, and the
+observed shape stays in the evidence. Missing → `WARN`; any other type → `FAIL`.
+
 ## `evidence`
 
 One record per probe that made a call. Enough to reproduce the call and to recognise the

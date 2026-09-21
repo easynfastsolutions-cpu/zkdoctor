@@ -59,8 +59,8 @@ def _diff_shapes(b: Any, t: Any, path: str, out: list[tuple[str, str, Any, Any]]
         return
     if b == "null" or t == "null":  # nullable fields legitimately flip with chain state
         return
-    if {b, t} == {"integer", "number"}:
-        return
+    if isinstance(b, str) and isinstance(t, str) and {b, t} == {"integer", "number"}:
+        return  # (b/t can be a list/dict shape here; only scalar names are hashable)
     out.append(("type", path or "(root)", b if isinstance(b, str) else _kind(b), t if isinstance(t, str) else _kind(t)))
 
 

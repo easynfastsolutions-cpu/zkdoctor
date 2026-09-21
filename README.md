@@ -1,8 +1,8 @@
 # ZKDoctor: ZKsync Compatibility Doctor
 
-**Status: V0.1 release candidate (`0.1.0`, scan schema `0.1`).** Feature-frozen. Validated
-against one real ZKsync OS endpoint (the public Developer Preview testnet); not yet
-validated across two real server versions. See [Limitations](#limitations).
+**Status: V0.1.1 (scan schema `0.1`).** Feature-frozen. Validated against the public
+ZKsync OS Developer Preview testnet and against two real local `zksync-os-server` releases
+(`v0.20.12`, `v0.23.0`) run on GitHub Actions. See [Limitations](#limitations).
 
 A small, deterministic CLI that records what a ZKsync RPC endpoint actually supports and
 how it behaves, then compares two recordings:
@@ -152,18 +152,22 @@ An unreachable endpoint is exit 2, never a compatibility failure.
 ## Development
 
 ```bash
-uv run pytest                                  # 75 tests, localhost only
+uv run pytest                                  # 84 tests, localhost only
 ZKDOCTOR_INTEGRATION_RPC=https://zksync-os-testnet-alpha.zksync.dev/ \
   uv run pytest tests/integration              # 3 live tests
 ```
 
 ## Limitations
 
-- **One real environment.** Validated against the public ZKsync OS Developer Preview
-  testnet only (`zksync-os/v0.24.0`, one day). No second public ZKsync OS environment
-  exists to compare it with, and no real version A → B comparison has been run.
-  Classification of real upgrades is therefore unproven; the eight "positive controls" in
-  the validation record are edits to a saved scan.
+- **A real A → B comparison has run, but it found nothing to classify.** Server `v0.20.12`
+  vs `v0.23.0` (same `v31.0` local chain) differed only in the client-version string
+  ([details](docs/validation.md)). Either the versions behave the same for the 11 probes,
+  or the probes are too shallow to see the difference (v0.23.0 adds RPC methods that are
+  not probed). Detection of a real compatibility break is therefore still unproven; the
+  eight "positive controls" in the validation record are edits to a saved scan.
+- **Deployments differ from each other and from the docs.** For example
+  `zks_getGenesis.additional_storage` is an array on the public testnet and an object on
+  the local releases; ZKDoctor reports this as a WARN with the shape kept in the evidence.
 - **EraVM probes untested on a real node.** ZKS-003 to ZKS-006 (documented for EraVM) have
   only been run against fake responses; the OS testnet does not expose them.
 - **Only probed methods are seen.** A method that appears in a newer server and is not one
