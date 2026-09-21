@@ -178,6 +178,21 @@ jobs:
           tail -n 2000 logs/server.log > logs/server.tail.log 2>/dev/null || true
           rm -f logs/server.log
 
+      - name: Publish results as annotations (readable via the public API, no sign-in)
+        if: always()
+        run: |
+          annotate() {
+            local msg; msg="$(cat "$2" 2>/dev/null || echo "(missing $2)")"
+            msg="${msg//'%'/'%25'}"; msg="${msg//$'\r'/'%0D'}"; msg="${msg//$'\n'/'%0A'}"
+            echo "::notice title=$1::$msg"
+          }
+          sed 's/\x1b\[[0-9;]*m//g' logs/server.tail.log 2>/dev/null | head -n 60 > logs/server.head.txt || true
+          annotate "runner-facts-${LABEL}" out/runner-facts.txt
+          annotate "startup-${LABEL}" out/startup.json
+          annotate "scan-report-${LABEL}" "out/scan-${LABEL}.txt"
+          annotate "scan-json-${LABEL}" "out/scan-${LABEL}.json"
+          annotate "server-log-head-${LABEL}" logs/server.head.txt
+
       - name: Upload scan and metadata
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -245,6 +260,17 @@ jobs:
 
       - name: Side-by-side summary (raw facts, no classification)
         run: python3 experiments/summarize.py scans/scan-A.json scans/scan-B.json out/comparison.json | tee -a "$GITHUB_STEP_SUMMARY" out/summary.md
+
+      - name: Publish results as annotations (readable via the public API, no sign-in)
+        run: |
+          annotate() {
+            local msg; msg="$(cat "$2" 2>/dev/null || echo "(missing $2)")"
+            msg="${msg//'%'/'%25'}"; msg="${msg//$'\r'/'%0D'}"; msg="${msg//$'\n'/'%0A'}"
+            echo "::notice title=$1::$msg"
+          }
+          annotate "comparison-report" out/comparison.txt
+          annotate "comparison-json" out/comparison.json
+          annotate "side-by-side-summary" out/summary.md
 
       - name: Upload comparison
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
