@@ -1,0 +1,107 @@
+# Calibration (measurement only): how much disk / memory does an ADI external node really need?
+#
+# On a GitHub-hosted runner ONLY: measure the free space gained by removing preinstalled toolchains, start the
+# ADI external node pinned to v0.20.12-b1, let it sync for about 22 minutes (NOT the full chain), and record
+# per-directory growth, Docker log growth and memory once a minute. Nothing here touches a developer machine.
+name: adi-calibrate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [experiment/adi-repro]
+    paths:
+      - ".github/workflows/adi-calibrate.yml"
+      - "experiments/adi_calibrate_*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: adi-calibrate
+  cancel-in-progress: false
+
+env:
+  EN_SETUP_REPO: ADI-Foundation-Labs/ADI-Stack-EN-Setup-script
+  EN_SETUP_SHA: cd18f3f1a10c8d3cd43cc47d45cb6d2c5d0429a8
+  EN_VERSION: v0.20.12-b1
+  L1_RPC_URL: https://mainnet.gateway.tenderly.co
+  EXPECTED_CHAIN_ID: "0x9024"
+  SAMPLE_SECONDS: "1320"   # 22 minutes of syncing, then stop
+  SAMPLE_EVERY: "60"
+  DATA_DIR: en/mainnet_data
+  N_TIP: "1390000"
+
+jobs:
+  calibrate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    defaults:
+      run:
+        shell: bash -e {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Baseline (before any cleanup)
+        run: |
+          mkdir -p out
+          {
+            echo "start_utc=$(date -u +%FT%TZ)"
+            echo "== df"; df -h / /mnt 2>&1
+            echo; echo "== lsblk"; lsblk -o NAME,SIZE,TYPE,MOUNTPOINT
+            echo; echo "== swap"; swapon --show
+            echo; echo "== memory / cpu"; free -m; nproc
+            echo; echo "== docker"; docker --version; docker system df
+          } | tee out/baseline.txt
+
+      - name: Measure and remove preinstalled toolchains (remote runner only)
+        run: bash experiments/adi_calibrate_cleanup.sh
+
+      - name: Fetch the EN setup repo at the pinned commit
+        run: |
+          mkdir en && cd en
+          git init -q && git remote add origin "https://github.com/${EN_SETUP_REPO}.git"
+          git fetch -q --depth 1 origin "$EN_SETUP_SHA" && git checkout -q FETCH_HEAD
+          git log -1 --format='%H %s' | tee ../out/en-setup-commit.txt
+
+      - name: Start the external node (pinned image) and wait for its RPC
+        run: |
+          key="$(openssl rand -hex 32)"
+          echo "::add-mask::$key"
+          cd en
+          export EN_VERSION EXTERNAL_NETWORK_SECRET_KEY="$key"
+          ./external-node.sh start --l1-rpc-url "$L1_RPC_URL" 2>&1 | sed "s/$key/***/g" > ../out/en-start.txt
+          cd ..
+          docker image inspect --format 'image size bytes: {{.Size}}' \
+            "harbor.sde.adifoundation.ai/ghpc/adi-foundation-labs/server:${EN_VERSION}" | tee out/image-size.txt
+          rpc() { curl -s --max-time 5 -X POST -H 'Content-Type: application/json' \
+                    --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$2\",\"params\":[]}" "$1"; }
+          resp=""
+          for i in $(seq 1 300); do
+            [[ -n "$(docker ps -q -f name=adi_mainnet_external_node)" ]] || { echo "::error::EN container not running"; exit 1; }
+            resp="$(rpc http://127.0.0.1:3050 eth_chainId || true)"
+            [[ "$resp" == *'"result"'* ]] && break
+            sleep 5
+          done
+          [[ "$resp" == *"$EXPECTED_CHAIN_ID"* ]] || { echo "::error::EN chain ID mismatch or RPC not ready: $resp"; exit 1; }
+          echo "EN RPC ready (chain ID ok) after about $((i * 5))s" | tee out/en-ready.txt
+
+      - name: Sample for 22 minutes (measurement only, not the full chain)
+        run: python3 experiments/adi_calibrate_sample.py
+
+      - name: Stop the node and summarise
+        if: always()
+        run: |
+          (cd en && ./external-node.sh down > /dev/null 2>&1) || true
+          if [ -s out/samples.jsonl ] && [ -s out/df-after.txt ]; then python3 experiments/adi_calibrate_summary.py out; else echo "::warning::no samples to summarise"; fi
+          { echo "== after stop"; df -h / /mnt 2>&1; } | tee out/final-df.txt
+
+      - name: Upload raw measurements
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: adi-calibrate
+          path: out/
+          if-no-files-found: warn
+          retention-days: 30
