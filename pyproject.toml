@@ -30,6 +30,24 @@ dev = ["pytest>=8"]
 [tool.hatch.build.targets.wheel]
 packages = ["src/zkdoctor"]
 
+[tool.hatch.build.targets.sdist]
+# Explicit allowlist: hatchling's default sdist walks the whole working directory and picks up
+# anything not gitignored, including files that are merely untracked (never `git add`ed) rather
+# than intentionally shipped. This keeps the source tarball to only what's needed to build, test,
+# and document the package, regardless of scratch files sitting in the working tree at build time.
+include = [
+    "/src",
+    "/tests",
+    "/docs",
+    "/experiments",
+    "/README.md",
+    "/LICENSE",
+]
+exclude = [
+    # one-off ADI incident reproduction artifacts: not committed, not part of the package
+    "/docs/validation/2026-09-21-adi",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["integration: needs a live ZKsync RPC (set ZKDOCTOR_INTEGRATION_RPC)"]
