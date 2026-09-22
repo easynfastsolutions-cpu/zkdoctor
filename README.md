@@ -1,48 +1,63 @@
 # ZKDoctor: ZKsync Compatibility Doctor
 
-**Status: V0.1.1 (scan schema `0.1`).** Feature-frozen. Validated against the public
-ZKsync OS Developer Preview testnet and against two real local `zksync-os-server` releases
-(`v0.20.12`, `v0.23.0`) run on GitHub Actions. See [Limitations](#limitations).
+**Status: v0.2.0.** `scan` and `compare` are the stable core; `watch` is an experimental
+addition (see its own section). Every claim below is backed by a real, dated run against
+real public infrastructure, linked inline — not a mock.
 
-A small, deterministic CLI that records what a ZKsync RPC endpoint actually supports and
-how it behaves, then compares two recordings:
+A small, deterministic CLI that:
 
-> After a ZKsync OS version or configuration change, what actually changed or broke?
+- **records** what a ZKsync RPC endpoint actually supports and how it behaves (`scan`),
+- **compares** two recordings for compatibility differences (`compare`),
+- **watches** one live node against a reference for silent stalls (`watch`, experimental).
 
-Its main finding so far is that **documentation, server implementation and a running node
-can each disagree** (see [docs/validation.md](docs/validation.md)), so ZKDoctor probes
-instead of assuming.
+It sends no transactions, holds no keys, and does not alert, score, or diagnose. `watch`
+polls repeatedly, but is not a monitoring product — see its section.
 
-## What it does
+## `scan` and `compare`
 
-1. Discovers the endpoint: chain ID, client version, detected environment
-   (`zksync-os` / `zksync-eravm` / `zksync-unknown` / `generic-evm`), execution version.
-2. Detects which JSON-RPC methods are supported (capabilities). Read-only.
-3. Runs 11 read-only probes (4 generic EVM, 7 `zks_`) and validates response *structure*
-   against the documented schemas.
-4. Records evidence per probe: request/response SHA-256, HTTP status, RPC error, latency
-   and a bounded summary. Never the full response.
-5. Saves the scan as versioned JSON.
-6. Compares two scans, ignoring dynamic values (block height, timestamps, prices).
+`scan` runs 11 read-only probes against an endpoint (4 generic EVM: `eth_chainId`,
+`eth_blockNumber`, `web3_clientVersion`, `net_version`; 7 `zks_` methods), records which
+methods are supported, validates response *structure* against the documented ZKsync schemas,
+and captures evidence for every probe (request/response SHA-256, HTTP status, RPC error,
+latency, a bounded summary — never the full response). `compare` diffs two scans and reports
+compatibility-relevant differences, ignoring dynamic values like block height, timestamps,
+and prices.
 
-It sends no transactions, holds no keys, and does not monitor, alert, score or diagnose.
+### Real bugs found running this on real infrastructure
 
-## Install
+- **2026-09-20, public ZKsync OS Developer Preview testnet** (`zksync-os-testnet-alpha.zksync.dev`,
+  chain ID `8022833`, client `zksync-os/v0.24.0`): the documented schema and the real node
+  disagreed in four places — `net_version` is hex, not the documented decimal string;
+  `zks_getGenesis` is missing the documented `execution_version` field and has undocumented
+  ones (`additional_preimages`, `additional_storage_raw`); `zks_getBlockMetadataByNumber`
+  rejects the documented hex-string block parameter and requires a JSON integer instead.
+  Full record: [docs/validation.md](docs/validation.md), saved scans in
+  [`docs/validation/2026-09-20-testnet/`](docs/validation/2026-09-20-testnet/).
+- **2026-09-21, two real `zksync-os-server` releases (`v0.20.12`, `v0.23.0`) run side by side
+  on GitHub Actions**
+  ([run 35568950248](https://github.com/easynfastsolutions-cpu/zkdoctor/actions/runs/35568950248),
+  then fixed and re-verified in
+  [run 35569606266](https://github.com/easynfastsolutions-cpu/zkdoctor/actions/runs/35569606266)):
+  this run found two real bugs in ZKDoctor itself — `zkdoctor --version` exited 2 with
+  "Missing command" instead of printing the version (the option wasn't eager), and the
+  genesis-schema check FAILed a real server's response because `additional_storage` was an
+  object where the docs say array, when the response was actually fine (softened to WARN,
+  with the observed shape kept in evidence). Both fixed in what became v0.1.1. The A/B
+  comparison itself found only the expected client-version difference between the two
+  releases — 0 breaking, 11 probes unchanged — a neutral result, not a caught compatibility
+  break.
+- **2026-09-21, ADI mainnet and testnet public RPCs** (chain IDs `36900` / `99999`, client
+  `zksync-os/v0.21.1`): reconfirmed the same `net_version`-is-hex and missing-`execution_version`
+  pattern on a third, unrelated deployment — this is a real, recurring gap between the ZKsync
+  OS docs and multiple independent nodes, not a one-off.
 
-Requires Python 3.12+.
-
-```bash
-uv sync                    # or: pip install -e .
-uv run zkdoctor --help
-```
-
-## Scan
+### Usage
 
 ```bash
 zkdoctor scan --rpc https://zksync-os-testnet-alpha.zksync.dev/ --output scan.json
 ```
 
-Real output (public ZKsync OS Developer Preview testnet, 2026-09-20; the saved scan is
+Real output (2026-09-20; saved scan:
 [`docs/validation/2026-09-20-testnet/scan-t0.json`](docs/validation/2026-09-20-testnet/scan-t0.json)):
 
 ```text
@@ -90,8 +105,6 @@ Options: `--output/-o FILE`, `--timeout SECONDS` (default 10), `--require METHOD
 report). Credentials in the URL are redacted from everything printed or stored
 ([details](docs/schema.md#redaction)).
 
-## Compare
-
 ```bash
 zkdoctor scan --rpc http://localhost:3050 --output baseline.json    # before the change
 zkdoctor scan --rpc http://localhost:3050 --output target.json      # after the change
@@ -138,6 +151,108 @@ Options: `--output/-o FILE`, `--critical METHOD` (repeatable; extra methods whos
 
 An unreachable endpoint is exit 2, never a compatibility failure.
 
+## `watch` (experimental)
+
+`watch` polls a target node against a reference node on the same chain, read-only, and
+appends one JSON record per poll. It exists to answer one narrow question: **can a
+lightweight, black-box scanner detect a node that is silently stalled while still reporting
+itself healthy** — the failure pattern in a real public incident,
+[ADI-Stack-EN-Setup-script#21](https://github.com/ADI-Foundation-Labs/ADI-Stack-EN-Setup-script/issues/21):
+an external node pinned to an old image (`v0.20.12-b1`) fell behind mainnet (already on
+`v0.21.1`) and stopped applying blocks entirely, while its status endpoint kept answering
+`{"healthy": true}` and its RPC kept serving the stale head. A related report,
+[issue #17](https://github.com/ADI-Foundation-Labs/ADI-Stack-EN-Setup-script/issues/17),
+describes the same shape: a node frozen for ~24h while `healthy: true` the entire time.
+
+It is not a monitoring product: one target, one reference, no dashboard, no alerting, no
+database. See [docs/watch.md](docs/watch.md) for the full finding model.
+
+### The honest result: validated, not yet a catch
+
+Two full live-node reproduction attempts were run: an ADI external node pinned to the exact
+`v0.20.12-b1` image from the incident, started fresh from genesis on a GitHub-hosted runner,
+watched with `zkdoctor watch` against ADI's real public mainnet RPC
+(`https://rpc.adifoundation.ai/`), chain ID confirmed matching (`36900`) before any comparison.
+
+- **Attempt 1** ([run 35577380179](https://github.com/easynfastsolutions-cpu/zkdoctor/actions/runs/35577380179),
+  2026-09-21): synced past the incident's exact stall block (1,253,580) with **282/282** real
+  block-hash agreements against the live reference, then the container died — not from the
+  incident condition, but from the runner's disk filling up (diagnosed precisely: ~76 GiB of
+  chain data + ~10 GiB of uncapped Docker logs). This produced 269 consecutive `RPC_ERROR`
+  polls (2h18m) with exit code 0 — a real gap in `watch` itself (nothing escalated an error
+  that never stopped), fixed by adding the `TARGET_UNREACHABLE_SUSTAINED` finding.
+- **Attempt 2** ([run 35615807966](https://github.com/easynfastsolutions-cpu/zkdoctor/actions/runs/35615807966),
+  2026-09-21, after fixing the disk/log issue and adding explicit exit-code/OOM diagnostics):
+  ran the full ~5.6 hours, reached the live chain tip (height climbed from 9 to 1,390,499,
+  ~69 blocks/s average), and the container never died — confirmed directly (`docker inspect`:
+  `Running=true`, `ExitCode=0`, `OOMKilled=false`, zero kernel OOM lines in `dmesg`). **652/652**
+  state-hash checks passed. One transient `TARGET_STALLED` WARNing fired at 19:35:12 UTC
+  (target height unchanged for 123s) and self-resolved the next poll — health correctly stayed
+  `healthy` throughout, matching the near-instant real recovery, so `HEALTH_CHECK_FALSE_POSITIVE`
+  correctly never fired. Zero `STATE_DIVERGENCE`, zero sustained failures.
+
+**Combined: 1,203 real polls (551 + 652) across the two reproduction attempts, zero false
+positives** — every WARN or FAIL raised was justified by what was actually happening, and
+every all-clear was correct.
+
+**What this does and doesn't show.** The detection logic is now validated against real,
+independently-run infrastructure, not just mocks — it correctly told a syncing-but-behind
+node apart from a stalled one, correctly withheld the health-mismatch finding when health and
+reality agreed, and correctly refused to call a merely-slow RPC error a stall. But **the
+specific incident condition — a fully-synced, live-following node silently freezing while its
+own health endpoint still reports healthy — was never observed live in either ~5.5-hour
+window.** This is reported plainly as **inconclusive**, not as a win: the observation windows
+may simply have been too short relative to however long the original incident's node sat
+frozen before anyone noticed it.
+
+### Usage
+
+```bash
+zkdoctor watch --rpc http://127.0.0.1:3050 --reference https://rpc.adifoundation.ai/ \
+  --interval 30s --health-url http://127.0.0.1:3071/status/health --output watch.jsonl
+```
+
+The one real `TARGET_STALLED` finding from attempt 2 (trimmed from the actual JSONL record,
+`watch-adi-repro.jsonl`, poll 533):
+
+```json
+{
+  "seq": 533,
+  "timestamp": "2026-09-21T19:35:12.217Z",
+  "status": "WARN",
+  "findings": [{
+    "code": "TARGET_STALLED",
+    "status": "WARN",
+    "message": "target height 1389412 unchanged for 123s while reference advanced 1 blocks (now 1 behind)"
+  }],
+  "target": {"height": 1389412, "seconds_since_change": 123.44},
+  "reference": {"height": 1389413},
+  "health": {"status": "healthy"}
+}
+```
+
+Options: `--lag-warn-blocks` (default 2), `--stale-warn`/`--stale-fail` (default 60s/300s),
+`--fail-after` (default 2), `--unreachable-after` (default 10), `--health-url` (never guessed
+— only fetched if you provide it). Full finding model, exit codes, and JSONL schema:
+[docs/watch.md](docs/watch.md).
+
+## Install
+
+Not yet published to PyPI. Requires Python 3.12+.
+
+```bash
+pip install git+https://github.com/easynfastsolutions-cpu/zkdoctor.git
+zkdoctor --help
+```
+
+For development:
+
+```bash
+git clone https://github.com/easynfastsolutions-cpu/zkdoctor.git && cd zkdoctor
+uv sync                    # or: pip install -e .
+uv run zkdoctor --help
+```
+
 ## Documentation
 
 | Doc | Contents |
@@ -145,6 +260,7 @@ An unreachable endpoint is exit 2, never a compatibility failure.
 | [docs/schema.md](docs/schema.md) | Scan JSON and evidence format, statuses, redaction |
 | [docs/comparison.md](docs/comparison.md) | What is compared, classification rules, blind spots |
 | [docs/validation.md](docs/validation.md) | Real-testnet validation, docs-vs-node discrepancies, controls |
+| [docs/watch.md](docs/watch.md) | `watch` finding model, thresholds, JSONL schema |
 | [docs/architecture.md](docs/architecture.md) | Module layout and design decisions |
 | [docs/sources.md](docs/sources.md) | Official sources, observed behaviour, assumptions |
 | [tests/integration/README.md](tests/integration/README.md) | Optional live-node tests and local-node workflow |
@@ -152,7 +268,7 @@ An unreachable endpoint is exit 2, never a compatibility failure.
 ## Development
 
 ```bash
-uv run pytest                                  # 84 tests, localhost only
+uv run pytest                                  # 127 tests (43 for watch), localhost only, 3 skipped
 ZKDOCTOR_INTEGRATION_RPC=https://zksync-os-testnet-alpha.zksync.dev/ \
   uv run pytest tests/integration              # 3 live tests
 ```
@@ -178,3 +294,12 @@ ZKDOCTOR_INTEGRATION_RPC=https://zksync-os-testnet-alpha.zksync.dev/ \
 - Compares response *structure* only; it does not verify values, proofs, L1 state or
   behaviour under load. One sample per probe, so no intermittent-failure detection.
 - No transaction-based or write probes, by design.
+- **`watch` has not caught the failure mode it was built for.** See the honest result above —
+  the detection logic is validated on real infrastructure, but the specific silent-stall
+  condition has not been observed live. Two ~5.5-hour windows is not long enough to rule it
+  out as rare or conditional (e.g. tied to a specific version-skew event) rather than common.
+- **`watch` peer count is not collected** — no existing probe for it, and it is not in ADI's
+  documented method list. It would only ever be corroborating evidence, never an independent
+  trigger.
+- **`watch` health checks are never discovered** — only a URL explicitly provided by the
+  operator is fetched. No port or path is guessed.
